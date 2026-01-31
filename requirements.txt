@@ -1,0 +1,27 @@
+# KFL Backend GPU v5 - Backfill Pipeline
+# ======================================
+
+# Core
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+PyYAML>=6.0
+psutil>=5.9.0
+python-dateutil>=2.8.0
+
+# Database
+psycopg2-binary>=2.9.0
+
+# GPU acceleration (CuPy for CUDA 12.x)
+cupy-cuda12x>=12.0.0
+
+# CPU optimization (Numba JIT compilation)
+numba>=0.58.0
+
+# Progress and logging
+colorlog>=6.7.0
+rich>=13.0.0
+tqdm>=4.65.0
+
+# Development (optional)
+ipython>=8.0.0

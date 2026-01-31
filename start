@@ -1,0 +1,3 @@
+#!/bin/sh
+# REASON: Launcher voor docker-menu.py in KFL_backend_GPU_v5.3
+python /app/docker-menu.py "$@"

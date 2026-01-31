@@ -1,0 +1,45 @@
+database:
+  host: 10.10.10.3
+  port: 5432
+  name: kflhyper
+  user: kfl_gpu_backfill
+  password: 1234
+  pool_min: 5
+  pool_max: 20
+  timeout: 300
+gpu:
+  device_id: 0
+  memory_fraction: 0.8
+  enabled: true
+processing:
+  start_date: '2025-01-01'
+  end_date: '2025-12-31'
+  intervals:
+  - '1'
+  - '60'
+  - '240'
+  - D
+  asset_ids: []
+  use_selected_assets: true
+  mode: full
+  lookback_buffer: 250
+tables:
+  indicators: kfl.indicators
+  signals:
+    lead: kfl.signals_lead
+    coin: kfl.signals_coin
+    conf: kfl.signals_conf
+  staging:
+    indicators: staging.indicators_backfill
+    signals_lead: staging.signals_lead_backfill
+    signals_coin: staging.signals_coin_backfill
+    signals_conf: staging.signals_conf_backfill
+performance:
+  copy_chunk_rows: 100000
+  use_staging_tables: true
+logging:
+  level: INFO
+  file_logging: true
+  log_directory: _log
+  console_output: true
+  verbose: false

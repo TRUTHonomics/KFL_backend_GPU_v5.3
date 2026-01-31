@@ -1,0 +1,78 @@
+services:
+  KFL_backend_GPU_v5_3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kfl-backend-gpu-v5.3:latest
+    container_name: KFL_backend_GPU_v5_3
+    restart: unless-stopped
+    
+    # REASON: IPC host mode voor CUDA multiprocessing support
+    ipc: host
+    shm_size: '8gb'
+    
+    # Environment variables
+    env_file:
+      - .env.local
+    
+    # GPU ondersteuning
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - CUDA_LAUNCH_BLOCKING=0
+      - CUPY_CACHE_IN_MEMORY=1
+      # Numba optimizations
+      - NUMBA_CACHE_DIR=/app/.numba_cache
+      - NUMBA_NUM_THREADS=16
+      # Database via backbone netwerk naar kfl-db (10.10.10.3)
+      - DB_HOST=10.10.10.3
+      - DB_PORT=5432
+      - POSTGRES_HOST=10.10.10.3
+      - POSTGRES_PORT=5432
+    
+    # Volumes
+    volumes:
+      - .:/app
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    
+    # Network
+    networks:
+      - kfl-network
+    
+    # PostgreSQL server via SSH tunnel op Windows host
+    # REASON: Docker Desktop kan niet direct naar 10.10.10.3 routeren.
+    # Gebruik host.docker.internal om via SSH tunnel (15432) te verbinden.
+    extra_hosts:
+      - "postgres-server:host-gateway"
+      - "host.docker.internal:host-gateway"
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 75G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+    # Port mapping
+    ports:
+      - "8081:8080"
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    
+    # Interactive terminal
+    stdin_open: true
+    tty: true
+
+networks:
+  kfl-network:
+    driver: bridge
