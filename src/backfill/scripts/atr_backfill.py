@@ -40,11 +40,13 @@ from psycopg2 import OperationalError, InterfaceError
 # KFL Backend imports
 from ..config import DEFAULT_DB_CONNECTION, ATR_MAX_WORKERS, ATR_BATCH_SIZE
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# KFL logregels: _log/ met setup_kfl_logging
+_src_root = Path(__file__).resolve().parent.parent.parent
+if str(_src_root) not in sys.path:
+    sys.path.insert(0, str(_src_root))
+from utils.kfl_logging import setup_kfl_logging
+
+logger = setup_kfl_logging("atr_backfill", log_level=logging.INFO)
 
 # MTF tabellen mapping
 MTF_TABLES = {

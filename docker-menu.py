@@ -30,6 +30,9 @@ CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 LOG_DIR = PROJECT_ROOT / "_log"
 SRC_DIR = PROJECT_ROOT / "src"
 
+sys.path.insert(0, str(SRC_DIR))
+from utils.kfl_logging import setup_kfl_logging
+
 
 def clear_screen():
     """Clear terminal screen"""
@@ -333,144 +336,103 @@ def run_full_backfill_sequence():
         input("\nDruk op Enter om terug te gaan...")
         return
     
-    # Archiveer oude logs
-    archive_old_logs(pattern="full_backfill_*.log")
-    
-    # Setup logging
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_filename = f"full_backfill_{timestamp}.log"
-    log_file = LOG_DIR / log_filename
-    
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)  # REASON: DEBUG voor MTF worker visibility
-    for handler in root_logger.handlers[:]:
-        handler.close()
-        root_logger.removeHandler(handler)
-    
+    log = setup_kfl_logging("full_backfill", project_root=PROJECT_ROOT, log_level=logging.DEBUG)
+    log.info("START VOLLEDIGE BACKFILL SEQUENCE")
+    log.info("Modi: Step1=%s, Step2=%s", mode_step1, mode_step2)
+    log.info("Assets: %s, Intervallen: %s", len(asset_ids) if asset_ids else "ALL", intervals)
+    log.info("Periode: %s tot %s", start_date_str, end_date_str)
+
+    overall_start = time.time()
+
+    # === STAP 1: Indicators & Signals Backfill ===
+    print("\n" + "=" * 70)
+    print(f"STAP 1/2: Indicators & Signals Backfill ({mode_step1})")
+    print("=" * 70)
+    log.info("STAP 1: Indicators & Signals backfill (mode=%s)", mode_step1)
+
+    proc_config = {
+        "mode": mode_step1,
+        "asset_selection": asset_selection,
+        "asset_ids": asset_ids if asset_selection == "specific" else None,
+        "intervals": intervals,
+        "start_date": start_date_str,
+        "end_date": end_date_str,
+        "use_gpu": True,
+        "verbose": False,
+    }
+
+    if not run_pipeline(proc_config, config):
+        log.error("Indicators/Signals backfill gefaald")
+        print("\n❌ Indicators/Signals backfill gefaald - sequence afgebroken")
+        input("\nDruk op Enter om terug te gaan...")
+        return
+
+    print("\n✅ Stap 1 voltooid")
+
+    # === STAP 2: MTF Backfill ===
+    print("\n" + "=" * 70)
+    print(f"STAP 2/2: MTF Backfill ({mode_step2})")
+    print("=" * 70)
+    log.info("STAP 2: MTF Backfill (mode=%s)", mode_step2)
+
+    src_path = str(PROJECT_ROOT / "src")
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
+
+    mtf_intervals = [i for i in intervals if i in ["1", "60", "240", "D"]]
+
     try:
-        file_handler = logging.FileHandler(log_file, encoding='utf-8', delay=False)
-        file_handler.setLevel(logging.DEBUG)  # REASON: DEBUG voor MTF worker visibility
-        file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
-        root_logger.addHandler(file_handler)
-        
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s', datefmt='%H:%M:%S'))
-        root_logger.addHandler(console_handler)
-        
-        logging.info("=== START VOLLEDIGE BACKFILL SEQUENCE ===")
-        logging.info(f"Modi: Step1={mode_step1}, Step2={mode_step2}")
-        logging.info(f"Assets: {len(asset_ids) if asset_ids else 'ALL'}, Intervallen: {intervals}")
-        logging.info(f"Periode: {start_date_str} tot {end_date_str}")
-        
-        overall_start = time.time()
-        
-        # === STAP 1: Indicators & Signals Backfill ===
-        print("\n" + "=" * 70)
-        print(f"STAP 1/2: Indicators & Signals Backfill ({mode_step1})")
-        print("=" * 70)
-        logging.info(f"STAP 1: Indicators & Signals backfill (mode={mode_step1})")
-        
-        # REASON: Bouw proc_config met geselecteerde parameters
-        proc_config = {
-            'mode': mode_step1,
-            'asset_selection': asset_selection,
-            'asset_ids': asset_ids if asset_selection == 'specific' else None,
-            'intervals': intervals,
-            'start_date': start_date_str,
-            'end_date': end_date_str,
-            'use_gpu': True,
-            'verbose': False
-        }
-        
-        if not run_pipeline(proc_config, config):
-            logging.error("Indicators/Signals backfill gefaald")
-            print("\n❌ Indicators/Signals backfill gefaald - sequence afgebroken")
-            input("\nDruk op Enter om terug te gaan...")
-            return
-        
-        print("\n✅ Stap 1 voltooid")
-        
-        # === STAP 2: MTF Backfill ===
-        print("\n" + "=" * 70)
-        print(f"STAP 2/2: MTF Backfill ({mode_step2})")
-        print("=" * 70)
-        logging.info(f"STAP 2: MTF Backfill (mode={mode_step2})")
-        
-        # Setup MTF met geselecteerde parameters
-        src_path = str(PROJECT_ROOT / "src")
-        if src_path not in sys.path:
-            sys.path.insert(0, src_path)
-        
-        # REASON: MTF ondersteunt alleen 1, 60, 240, D - filter de geselecteerde intervals
-        mtf_intervals = [i for i in intervals if i in ['1', '60', '240', 'D']]
-        
-        try:
-            from backfill.writers.mtf_backfill import MTFBackfillWriter, create_mtf_indexes
-            
-            db_conn_string = get_db_connection_string(config)
-            # REASON: Gebruik dezelfde asset_ids als stap 1
-            mtf_asset_ids = asset_ids if asset_ids else get_selected_asset_ids(config)
-            
-            if not mtf_asset_ids:
-                logging.warning("Geen assets voor MTF")
-                print("⚠️  Geen assets - skip MTF backfill")
-            elif not mtf_intervals:
-                logging.warning("Geen MTF-compatibele intervallen geselecteerd")
-                print("⚠️  Geen MTF intervals (1,60,240,D) - skip MTF backfill")
-            else:
-                create_mtf_indexes(db_conn_string)
-                writer = MTFBackfillWriter(db_conn_string)
-                
-                # Bepaal start datum voor MTF
-                is_gap_fill_mtf = (mode_step2 == 'gap_fill')
-                start_dt = datetime.strptime(start_date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-                # REASON: end_date 2025-12-25 moet betekenen TOT EN MET die dag (dus 2025-12-26 00:00:00)
-                end_dt_base = datetime.strptime(end_date_str, '%Y-%m-%d')
-                end_dt = (end_dt_base + timedelta(days=1)).replace(tzinfo=timezone.utc)
-                
-                logging.info(f"MTF backfill gestart (mode={mode_step2})")
-                # REASON: MTFBackfillWriter handelt nu zelf de per-asset gap detectie af
-                # als gap_fill=True. Gebruik chunk_days uit config voor veiligheid.
-                from src.backfill.config import MTF_MAX_WORKERS, MTF_CHUNK_DAYS
-                
-                results = writer.backfill_parallel(
-                    asset_ids=mtf_asset_ids,
-                    start_date=start_dt if not is_gap_fill_mtf else None,
-                    end_date=end_dt,
-                    intervals=mtf_intervals,
-                    gap_fill=is_gap_fill_mtf,
-                    max_workers=MTF_MAX_WORKERS,
-                    chunk_days=MTF_CHUNK_DAYS
-                )
-                
-                total_rows = sum(sum(r.values()) for r in results.values() if isinstance(r, dict) and 'error' not in r)
-                logging.info(f"MTF voltooid: {total_rows:,} rijen")
-                print(f"\n✅ Stap 2 voltooid: {total_rows:,} rijen")
-        
-        except Exception as e:
-            logging.error(f"MTF backfill gefaald: {e}", exc_info=True)
-            print(f"\n❌ MTF backfill gefaald: {e}")
-            input("\nDruk op Enter om terug te gaan...")
-            return
-        
-        # === SUMMARY ===
-        overall_duration = time.time() - overall_start
-        print("\n" + "=" * 70)
-        print("🎉 GPU BACKFILL SEQUENCE VOLTOOID")
-        print("=" * 70)
-        print(f"Totale tijd: {overall_duration/60:.1f} minuten")
-        print("\n📋 VOLGENDE STAP:")
-        print("   Draai QBN_v2 container > Outcome Backfill (optie a)")
-        print("   om outcomes te berekenen naar qbn.signal_outcomes")
-        logging.info(f"=== SEQUENCE VOLTOOID in {overall_duration/60:.1f} minuten ===")
-        
-    finally:
-        for handler in root_logger.handlers[:]:
-            handler.flush()
-            handler.close()
-    
+        from backfill.writers.mtf_backfill import MTFBackfillWriter, create_mtf_indexes
+
+        db_conn_string = get_db_connection_string(config)
+        mtf_asset_ids = asset_ids if asset_ids else get_selected_asset_ids(config)
+
+        if not mtf_asset_ids:
+            log.warning("Geen assets voor MTF")
+            print("⚠️  Geen assets - skip MTF backfill")
+        elif not mtf_intervals:
+            log.warning("Geen MTF-compatibele intervallen geselecteerd")
+            print("⚠️  Geen MTF intervals (1,60,240,D) - skip MTF backfill")
+        else:
+            create_mtf_indexes(db_conn_string)
+            writer = MTFBackfillWriter(db_conn_string)
+            is_gap_fill_mtf = (mode_step2 == "gap_fill")
+            start_dt = datetime.strptime(start_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            end_dt_base = datetime.strptime(end_date_str, "%Y-%m-%d")
+            end_dt = (end_dt_base + timedelta(days=1)).replace(tzinfo=timezone.utc)
+            log.info("MTF backfill gestart (mode=%s)", mode_step2)
+            from backfill.config import MTF_MAX_WORKERS, MTF_CHUNK_DAYS
+
+            results = writer.backfill_parallel(
+                asset_ids=mtf_asset_ids,
+                start_date=start_dt if not is_gap_fill_mtf else None,
+                end_date=end_dt,
+                intervals=mtf_intervals,
+                gap_fill=is_gap_fill_mtf,
+                max_workers=MTF_MAX_WORKERS,
+                chunk_days=MTF_CHUNK_DAYS,
+            )
+            total_rows = sum(sum(r.values()) for r in results.values() if isinstance(r, dict) and "error" not in r)
+            log.info("MTF voltooid: %s rijen", f"{total_rows:,}")
+            print(f"\n✅ Stap 2 voltooid: {total_rows:,} rijen")
+
+    except Exception as e:
+        log.error("MTF backfill gefaald: %s", e, exc_info=True)
+        print(f"\n❌ MTF backfill gefaald: {e}")
+        input("\nDruk op Enter om terug te gaan...")
+        return
+
+    overall_duration = time.time() - overall_start
+    print("\n" + "=" * 70)
+    print("🎉 GPU BACKFILL SEQUENCE VOLTOOID")
+    print("=" * 70)
+    print(f"Totale tijd: {overall_duration/60:.1f} minuten")
+    print("\n📋 VOLGENDE STAP:")
+    print("   Draai QBN_v2 container > Outcome Backfill (optie a)")
+    log.info("SEQUENCE VOLTOOID in %.1f minuten", overall_duration / 60)
+    for h in log.handlers:
+        h.flush()
+
     input("\nDruk op Enter om terug te gaan...")
 
 
@@ -799,40 +761,10 @@ def run_mtf_backfill():
         input("\nDruk op Enter om terug te gaan...")
         return
 
-    # === START LOGGING ===
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    archive_old_logs(pattern="mtf_backfill_*.log")
-    
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_filename = f"mtf_backfill_{timestamp}.log"
-    log_file = LOG_DIR / log_filename
-    
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)
-    for handler in root_logger.handlers[:]:
-        handler.close()
-        root_logger.removeHandler(handler)
-        
-    try:
-        file_handler = logging.FileHandler(log_file, encoding='utf-8', delay=False)
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
-        root_logger.addHandler(file_handler)
-        logging.info("=== START MTF BACKFILL ===")
-        logging.info(f"Assets: {len(asset_ids)}, Intervallen: {intervals}")
-        logging.info(f"Parameters: {start_date_str} tot {end_date_str}, chunk_days={chunk_days}, chunk_months={chunk_months}")
-        file_handler.flush()
-    except Exception as e:
-        print(f"❌ Kon logbestand niet aanmaken: {e}")
-        input("\nDruk op Enter om terug te gaan...")
-        return
-    
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s', datefmt='%H:%M:%S'))
-    root_logger.addHandler(console_handler)
-
-    print(f"\n📝 Log: {log_filename}")
+    log = setup_kfl_logging("mtf_backfill", project_root=PROJECT_ROOT, log_level=logging.DEBUG)
+    log.info("START MTF BACKFILL")
+    log.info("Assets: %s, Intervallen: %s", len(asset_ids), intervals)
+    log.info("Parameters: %s tot %s, chunk_days=%s, chunk_months=%s", start_date_str, end_date_str, chunk_days, chunk_months)
     
     # === IMPORTS ===
     src_path = str(PROJECT_ROOT / "src")
@@ -841,9 +773,9 @@ def run_mtf_backfill():
     
     try:
         from backfill.writers.mtf_backfill import MTFBackfillWriter, create_mtf_indexes
-        logging.info("MTF module geladen")
+        log.info("MTF module geladen")
     except ImportError as e:
-        logging.error(f"Import fout: {e}", exc_info=True)
+        log.error("Import fout: %s", e, exc_info=True)
         print(f"❌ Kon MTF module niet laden: {e}")
         input("\nDruk op Enter om terug te gaan...")
         return
@@ -851,30 +783,25 @@ def run_mtf_backfill():
     # === DATABASE ===
     db_conn_string = get_db_connection_string(config)
     db_pass = str(config.get('database', {}).get('password', '1234'))
-    logging.debug(f"DB connection: {db_conn_string.replace(db_pass, '***')}")
-    
+    log.debug("DB connection: %s", db_conn_string.replace(db_pass, "***"))
+
     if not test_database_connection(config):
-        logging.error("Database connectie gefaald")
+        log.error("Database connectie gefaald")
         input("\nDruk op Enter om terug te gaan...")
         return
     
     # === UITVOEREN ===
     print("\n🚀 START: MTF Backfill...")
     try:
-        logging.info("Aanmaken MTF indexes...")
-        # REASON: flush log handlers na belangrijke stappen voor debugging
-        for handler in logging.getLogger().handlers:
-            handler.flush()
-            
+        log.info("Aanmaken MTF indexes...")
+        for h in log.handlers:
+            h.flush()
         create_mtf_indexes(db_conn_string)
-        logging.info("MTF indexes aangemaakt, initialiseren writer...")
-        
+        log.info("MTF indexes aangemaakt, initialiseren writer...")
         writer = MTFBackfillWriter(db_conn_string)
-        logging.info(f"Writer geïnitialiseerd, start backfill_parallel voor {len(asset_ids)} assets...")
-        
-        # Flush zodat log zichtbaar is voordat potentieel langlopende operatie start
-        for handler in logging.getLogger().handlers:
-            handler.flush()
+        log.info("Writer geïnitialiseerd, start backfill_parallel voor %s assets...", len(asset_ids))
+        for h in log.handlers:
+            h.flush()
         
         results = writer.backfill_parallel(
             asset_ids=asset_ids, 
@@ -887,18 +814,17 @@ def run_mtf_backfill():
             gap_fill=is_gap_fill
         )
         
-        total_rows = sum(sum(r.values()) for r in results.values() if isinstance(r, dict) and 'error' not in r)
-        logging.info(f"Voltooid: {total_rows:,} rijen geschreven")
+        total_rows = sum(sum(r.values()) for r in results.values() if isinstance(r, dict) and "error" not in r)
+        log.info("Voltooid: %s rijen geschreven", f"{total_rows:,}")
         print(f"\n✅ Voltooid: {total_rows:,} rijen geschreven.")
     except Exception as e:
-        logging.error(f"MTF Backfill gefaald: {e}", exc_info=True)
+        log.error("MTF Backfill gefaald: %s", e, exc_info=True)
         print(f"\n❌ Fout: {e}")
         import traceback
         traceback.print_exc()
     
-    for handler in root_logger.handlers[:]:
-        handler.flush()
-    
+    for h in log.handlers:
+        h.flush()
     input("\nDruk op Enter om terug te gaan...")
 
 
@@ -919,6 +845,7 @@ def show_menu():
 
 
 def main():
+    setup_kfl_logging("docker_menu", project_root=PROJECT_ROOT)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     while True:
         clear_screen()

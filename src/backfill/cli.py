@@ -11,7 +11,6 @@ import argparse
 import fcntl
 import logging
 import os
-import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,13 +18,12 @@ from typing import List, Optional
 
 from .config import DEFAULT_DB_CONNECTION
 from .pipeline import BackfillPipeline
+from utils.kfl_logging import setup_kfl_logging
 
-logger = logging.getLogger(__name__)
-
-# Log directory (relative to script or absolute)
-LOG_DIR = Path('/app/_log') if os.path.exists('/app') else Path(__file__).parent.parent.parent / '_log'
-ARCHIVE_DIR = LOG_DIR / 'archive'
-LOCK_FILE = LOG_DIR / '.backfill.lock'
+# Log directory for lock file (same as KFL _log/)
+LOG_DIR = Path("/app/_log") if os.path.exists("/app") else Path(__file__).resolve().parent.parent.parent / "_log"
+ARCHIVE_DIR = LOG_DIR / "archive"
+LOCK_FILE = LOG_DIR / ".backfill.lock"
 
 
 class PipelineLock:
@@ -88,73 +86,6 @@ class PipelineLock:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
         return False
-
-
-def setup_logging(verbose: bool = False, quiet: bool = False) -> Path:
-    """
-    Setup logging met file output en archivering.
-    
-    Returns:
-        Path to the current log file
-    """
-    # Maak directories aan
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
-    
-    # Archiveer bestaande backfill logs
-    for old_log in LOG_DIR.glob('backfill_*.log'):
-        if old_log.is_file():
-            # Verplaats naar archive met timestamp
-            archive_name = f"{old_log.stem}_archived_{datetime.now().strftime('%H%M%S')}.log"
-            shutil.move(str(old_log), str(ARCHIVE_DIR / archive_name))
-    
-    # Nieuwe log file met timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file = LOG_DIR / f'backfill_{timestamp}.log'
-    
-    # Bepaal log level
-    if verbose:
-        level = logging.DEBUG
-    elif quiet:
-        level = logging.ERROR
-    else:
-        level = logging.INFO
-    
-    # Root logger configureren
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-    
-    # Clear existing handlers
-    root_logger.handlers.clear()
-    
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
-    console_handler.setFormatter(logging.Formatter(
-        '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    ))
-    root_logger.addHandler(console_handler)
-    
-    # File handler
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
-    file_handler.setLevel(level)  # REASON: Respecteer vlaggen ook voor logfile
-    file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    ))
-    root_logger.addHandler(file_handler)
-    
-    return log_file
-
-
-def write_log_header(log_file: Path, args: argparse.Namespace):
-    """Schrijf header informatie naar log file."""
-    with open(log_file, 'w', encoding='utf-8') as f:
-        f.write("=== Backfill Pipeline ===\n")
-        f.write(f"Started: {datetime.now(timezone.utc).isoformat()}\n")
-        f.write(f"Command: {' '.join(sys.argv)}\n")
-        f.write("=" * 70 + "\n\n")
 
 
 def parse_date(date_str: Optional[str]) -> Optional[datetime]:
@@ -316,11 +247,10 @@ Examples:
     )
     
     args = parser.parse_args()
-    
-    # Setup logging met file output
-    log_file = setup_logging(verbose=args.verbose, quiet=args.quiet)
-    write_log_header(log_file, args)
-    logger.info(f"Log file: {log_file}")
+
+    level = logging.DEBUG if args.verbose else (logging.ERROR if args.quiet else logging.INFO)
+    logger = setup_kfl_logging("backfill", log_level=level)
+    logger.info("Command: %s", " ".join(sys.argv))
     
     # Parse arguments
     try:

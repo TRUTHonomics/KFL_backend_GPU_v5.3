@@ -9,15 +9,15 @@ Dit voorkomt 'tuple decompression limit exceeded' errors tijdens backfill operat
 import os
 import sys
 import psycopg2
+from pathlib import Path
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from psycopg2 import sql
 import logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('init_db_params')
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+from utils.kfl_logging import setup_kfl_logging
+
+logger = setup_kfl_logging("init_db_params")
 
 
 def init_timescaledb_params():

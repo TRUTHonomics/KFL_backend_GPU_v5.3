@@ -1,9 +1,14 @@
-﻿import sys
+import sys
 import subprocess
 import os
 import argparse
 import psycopg2
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
+
+# KFL logregels: log file in _log/
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+from utils.kfl_logging import setup_kfl_logging
 
 def get_db_connection_string():
     """Genereer database connection string op basis van environment variabelen."""
@@ -81,6 +86,9 @@ def run_mtf_step(asset_ids, intervals, start_date_str, mode, env):
         return False
 
 def main():
+    logger = setup_kfl_logging("runner")
+    logger.info("Command: %s", " ".join(sys.argv))
+
     # Parse arguments passed from backend menu
     parser = argparse.ArgumentParser(description='Compatibility shim for GPU Backfill')
     parser.add_argument('--mode', type=str)
