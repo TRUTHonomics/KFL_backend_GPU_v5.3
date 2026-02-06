@@ -1,10 +1,10 @@
 services:
-  KFL_backend_GPU_v5_3:
+  KFL_backend_GPU_v6:
     build:
       context: .
       dockerfile: Dockerfile
-    image: kfl-backend-gpu-v5.3:latest
-    container_name: KFL_backend_GPU_v5_3
+    image: kfl-backend-gpu-v6:latest
+    container_name: KFL_backend_GPU_v6
     restart: unless-stopped
     
     # REASON: IPC host mode voor CUDA multiprocessing support
@@ -25,11 +25,14 @@ services:
       # Numba optimizations
       - NUMBA_CACHE_DIR=/app/.numba_cache
       - NUMBA_NUM_THREADS=16
-      # Database via backbone netwerk naar kfl-db (10.10.10.3)
-      - DB_HOST=10.10.10.3
-      - DB_PORT=5432
-      - POSTGRES_HOST=10.10.10.3
-      - POSTGRES_PORT=5432
+      # REASON: Database via SSH tunnel op Windows host (niet direct naar 10.10.10.3)
+      - DB_HOST=host.docker.internal
+      - DB_PORT=15432
+      - POSTGRES_HOST=host.docker.internal
+      - POSTGRES_PORT=15432
+      # Prevent Python bytecode caching
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
     
     # Volumes
     volumes:

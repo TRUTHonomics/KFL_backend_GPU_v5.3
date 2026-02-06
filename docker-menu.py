@@ -831,7 +831,7 @@ def run_mtf_backfill():
 def show_menu():
     """Toon hoofdmenu"""
     print("=" * 70)
-    print("     KFL BACKEND GPU v5.3 - Backfill Pipeline Menu")
+    print("     KFL BACKEND GPU v6 - Backfill Pipeline Menu")
     print("=" * 70)
     print("\nSelecteer een optie:")
     print("  1. 🔄 VOLLEDIGE Backfill (Indicators→Signals→MTF)")
