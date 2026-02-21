@@ -23,6 +23,16 @@ if ($existing) {
 
 Write-Host "Start SSH tunnel: 0.0.0.0:${LocalPort} -> ${RemoteUser}@${RemoteHost}:${RemotePort}" -ForegroundColor Cyan
 Write-Host "Container kan verbinden via host.docker.internal:${LocalPort}" -ForegroundColor Cyan
-Write-Host "Sluit dit venster niet; tunnel stopt dan." -ForegroundColor Gray
+Write-Host "Keep-alive actief: tunnel herstart automatisch bij uitval." -ForegroundColor Gray
 
-& $ssh.Source -N -L "0.0.0.0:${LocalPort}:localhost:${RemotePort}" "${RemoteUser}@${RemoteHost}"
+# REASON: Keep-alive loop: als SSH stopt (netwerk, reboot remote, etc.) direct herstart.
+while ($true) {
+    $proc = Start-Process -FilePath $ssh.Source `
+        -ArgumentList "-N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -L `"0.0.0.0:${LocalPort}:localhost:${RemotePort}`" `"${RemoteUser}@${RemoteHost}`"" `
+        -PassThru -NoNewWindow
+    Write-Host "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') Tunnel gestart (PID $($proc.Id))" -ForegroundColor Green
+    $proc.WaitForExit()
+    $exit = $proc.ExitCode
+    Write-Host "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') Tunnel gestopt (exit $exit). Herstart over 5s..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 5
+}
